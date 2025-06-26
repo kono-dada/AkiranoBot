@@ -146,9 +146,9 @@ async def _(
                 if not WITHDRAW_TIME:
                     # 未设置撤回时间 正常发送
                     message_id: int = (await setu_matcher.send(msg))["message_id"]
-
-                    await auto_update_setuinfo(setu)
-                    await bind_message_data(message_id, setu.pid)
+                    if not setu.is_local:
+                        await auto_update_setuinfo(setu)
+                        await bind_message_data(message_id, setu.pid)
                     logger.debug(f"Message ID: {message_id}")
                 else:
                     logger.debug(f"Using auto revoke API, interval: {WITHDRAW_TIME}")
@@ -160,7 +160,7 @@ async def _(
                 """
                 send_timer.stop()
                 global_speedlimiter.send_success()
-                if SETU_PATH is None:  # 未设置缓存路径，删除缓存
+                if SETU_PATH is None or setu.is_local:  # 未设置缓存路径，删除缓存
                     Path(setu.img).unlink()
                 return
             except ActionFailed:

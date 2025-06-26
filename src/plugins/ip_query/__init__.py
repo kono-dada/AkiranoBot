@@ -41,6 +41,7 @@ async def handle_ip_query(
     user_id = str(event.get_user_id())
     if user_id in plugin_config.ip_superusers or "*" in plugin_config.ip_superusers:
         ip_address = get_public_ip()
-        await ip_query_matcher.finish(f"明乃的涩图小站是: http://{ip_address}:3000，请前往上传图片")
-    else:
-        await ip_query_matcher.finish("明乃丢失了色图小站。")
+        try:
+            await ip_query_matcher.finish(f"明乃的涩图小站是: http://{ip_address}:3000，可以前往上传图片")
+        except Exception as e:
+            await ip_query_matcher.finish("明乃丢失了色图小站。")

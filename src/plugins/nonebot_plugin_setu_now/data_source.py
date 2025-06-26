@@ -6,8 +6,8 @@ import nonebot_plugin_localstore as store
 from httpx import AsyncClient
 from nonebot.log import logger
 
-from .utils import download_pic
-from .config import PROXY, API_URL, SETU_SIZE, REVERSE_PROXY
+from .utils import download_pic, fetch_local_pic
+from .config import PROXY, API_URL, SETU_SIZE, REVERSE_PROXY, REPO_BASE_URL
 from .models import Setu, SetuApiData, SetuNotFindError
 
 CACHE_PATH = Path(store.get_cache_dir("nonebot_plugin_setu_now"))
@@ -72,6 +72,11 @@ class SetuHandler:
         await self.handler(setu)
 
     async def process_request(self):
+        if REPO_BASE_URL != "" and not (self.key or self.tags or self.r18):
+            image_path = await fetch_local_pic()
+            setu = Setu.local_setu(image_path)
+            await self.handler(setu)
+            return
         await self.refresh_api_info()
         task_list = []
         for i in self.setu_instance_list:

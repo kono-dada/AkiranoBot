@@ -8,8 +8,9 @@ from httpx import AsyncClient
 from nonebot.log import logger
 from nonebot.adapters.onebot.v11 import Bot, Message, GroupMessageEvent
 
-from .config import SETU_PATH, SEND_INTERVAL
+from .config import SETU_PATH, SEND_INTERVAL, REPO_BASE_URL
 from .perf_timer import PerfTimer
+import random
 
 
 async def download_pic(
@@ -91,3 +92,28 @@ class SpeedLimiter:
             delay_time = round(delay_time, 2)
             logger.debug(f"Speed limit: Asyncio sleep {delay_time}s")
             await asyncio.sleep(delay_time)
+
+
+async def fetch_local_pic():
+    client = AsyncClient(timeout=5)
+    image_list_url = f"{REPO_BASE_URL}/list_images"
+    image_url = f"{REPO_BASE_URL}/original/"
+    try:
+        response = await client.get(image_list_url)
+        if response.status_code != 200:
+            logger.warning(
+                f"Image list respond status code error: {response.status_code}"
+            )
+            raise ValueError(
+                f"Image list respond status code error: {response.status_code}"
+            )
+        image_list = response.json()['images']
+        random_image_name = random.choice(image_list)
+        image_url = image_url + random_image_name
+        image_path = await download_pic(
+            url=image_url, file_mode=True, file_name=random_image_name
+        )
+        return image_path
+    except Exception as e:
+        logger.error(f"Fetch local image failed: {e}")
+        return None

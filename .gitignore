@@ -110,7 +110,7 @@ celerybeat.pid
 
 # Environments
 .env
-.venv
+.venv/
 env/
 venv/
 ENV/
@@ -143,3 +143,5 @@ dmypy.json
 data/
 
 *.DS_Store
+
+__pycache__/

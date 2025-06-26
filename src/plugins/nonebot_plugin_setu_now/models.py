@@ -38,6 +38,18 @@ class Setu:
         self.ext: str = data.ext
         self.img: Optional[Path] = None
         self.msg: Optional[str] = None
+        self.is_local: bool = False
+
+    @staticmethod
+    def local_setu(path: Path) -> "Setu":
+        """
+        Create a Setu instance for a local image.
+        """
+        setu = Setu(SetuData(pid=0, p=0, uid=0, title="", author="", r18=False,
+                             width=0, height=0, tags=[], ext="", aiType=0, uploadDate=0, urls={}))
+        setu.img = path
+        setu.is_local = True
+        return setu
 
 
 class SetuMessage(BaseModel):
