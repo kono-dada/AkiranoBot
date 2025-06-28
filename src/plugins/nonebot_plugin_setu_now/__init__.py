@@ -2,13 +2,16 @@ from nonebot import require
 
 require("nonebot_plugin_localstore")
 require("nonebot_plugin_tortoise_orm")
+require("coin")
 
 import json
 import asyncio
+import random
 from re import I, sub
 from typing import Any, Union, Annotated
 from pathlib import Path
 import os
+import httpx
 from PIL import UnidentifiedImageError
 from nonebot import on_regex, on_command
 from nonebot.log import logger
@@ -32,13 +35,39 @@ from nonebot.adapters.onebot.v11.helpers import (
 )
 
 from .utils import SpeedLimiter
-from .config import MAX, CDTIME, EFFECT, SETU_PATH, WITHDRAW_TIME, Config, EXCLUDEAI
+from .config import MAX, CDTIME, EFFECT, SETU_PATH, WITHDRAW_TIME, Config, EXCLUDEAI, REPO_BASE_URL
 from .models import Setu, SetuNotFindError
 from .database import SetuInfo, MessageInfo, bind_message_data, auto_update_setuinfo
 from .img_utils import EFFECT_FUNC_LIST, image_segment_convert
 from .perf_timer import PerfTimer
 from .data_source import SetuHandler
 from .r18_whitelist import get_group_white_list_record
+
+from ..coin import COIN_MANAGER
+
+from nonebot.matcher import Matcher
+from nonebot.adapters.onebot.v11 import MessageSegment
+from nonebot.internal.matcher import current_event  # 获取当前上下文的事件
+
+original_finish = Matcher.finish
+
+# 为 Matcher 重写 finish 方法
+@classmethod
+async def new_finish(
+    cls, 
+    message: Message | str | None = None, 
+    fallback=True,
+    **kwargs
+):
+    event = current_event.get()
+    if hasattr(event, "message_id"):
+        reply = MessageSegment.reply(event.message_id)
+        message = reply + message
+    await original_finish.__func__(cls, message, fallback=fallback, **kwargs)
+
+# 添加方法到 Matcher 实例上
+Matcher.finish = new_finish
+
 
 usage_msg = """TL;DR: 色图 或 看文档"""
 
@@ -81,6 +110,12 @@ async def _(
     regex_group: Annotated[tuple[Any, ...], RegexGroup()],
     white_list_record=Depends(get_group_white_list_record),
 ):
+    random_cost = random.randint(0, 100)
+    if COIN_MANAGER.get_balance(str(event.get_user_id())) < random_cost:
+        await setu_matcher.finish(
+            "你的明乃币不足，无法获取色图喵\n请使用 /c 签到 获取明乃币"
+        )
+        return
     # await setu_matcher.finish("服务器维护喵，暂停服务抱歉喵")
     setu_total_timer = PerfTimer("Image request total")
     args = list(regex_group)
@@ -118,7 +153,7 @@ async def _(
     failure_msg = 0
 
     async def nb_send_handler(setu: Setu) -> None:
-        nonlocal failure_msg
+        nonlocal failure_msg, random_cost
         if setu.img is None:
             logger.warning("Invalid image type, skipped")
             failure_msg += 1
@@ -138,7 +173,7 @@ async def _(
                 failure_msg += 1
                 return
             effert_timer.stop()
-            msg = Message(image_segment_convert(image))
+            msg = MessageSegment.reply(event.message_id) + Message(image_segment_convert(image)) + MessageSegment.text(f"你花了{random_cost}明乃币得到了色图")
             try:
                 await global_speedlimiter.async_speedlimit()
                 send_timer = PerfTimer("Image send")
@@ -158,6 +193,7 @@ async def _(
                 """
                 发送成功
                 """
+                COIN_MANAGER.modify_coins(str(event.get_user_id()), -random_cost)  # 扣除明乃币
                 send_timer.stop()
                 global_speedlimiter.send_success()
                 if SETU_PATH is None or setu.is_local:  # 未设置缓存路径，删除缓存
@@ -224,7 +260,7 @@ async def _(
             info_message += MessageSegment.text(f"平均分：{avg_score:.2f}\n")
             info_message += MessageSegment.text("打分记录：\n")
             for uid, score in rates.items():
-                info_message += MessageSegment.text(f"用户{uid}：{score}\n")
+                info_message += MessageSegment.text(f"{uid}：{score}\n")
         else:
             info_message += MessageSegment.text("暂无评分\n")
 
@@ -269,13 +305,56 @@ async def _(
 
     if setu_info := await SetuInfo.get_or_none(pid=message_pid):
         # 读取并更新评分字典
-        try:
-            rates = json.loads(setu_info.rates)
-        except Exception:
-            rates = {}
-        rates[user_id] = rate
-        setu_info.rates = json.dumps(rates, ensure_ascii=False)
+        if user_id in setu_info.rates:
+            await rate_matcher.finish("你已经打过分了，不要重复评分喵~")
+        setu_info.rates[user_id] = rate
         await setu_info.save()
-        await rate_matcher.finish(f"评分成功，已为该插画打分：{rate}")
+        bonus = random.randint(1, 30)
+        COIN_MANAGER.modify_coins(str(event.get_user_id()), bonus)
+        await rate_matcher.finish(f"成功评分{rate}分，奖励你{bonus}明乃币喵~")
     else:
         await rate_matcher.finish("该插画相关信息已被移除")
+
+
+collect_matcher = on_command("收藏")
+
+@collect_matcher.handle()
+async def _(
+    event: MessageEvent,
+):
+    logger.debug("Running collect handler")
+    event_message = event.original_message
+    reply_segment = event_message["reply"]
+
+    if reply_segment == []:
+        logger.debug("Command invalid: Not specified setu info to collect!")
+        await collect_matcher.finish("请直接回复需要收藏的插画")
+
+    reply_segment = reply_segment[0]
+    reply_message_id = reply_segment.data["id"]
+
+    logger.debug(f"Collect setu for message id: {reply_message_id}")
+
+    if message_info := await MessageInfo.get_or_none(message_id=reply_message_id):
+        message_pid = message_info.pid
+    else:
+        await collect_matcher.finish("未找到该插画相关信息")
+
+    if setu_info := await SetuInfo.get_or_none(pid=message_pid):
+        pid = setu_info.pid
+        filepath = next(Path(SETU_PATH).glob(f"{pid}.*"), None)
+        if filepath is None:
+            await collect_matcher.finish("未找到该插画文件")
+        async with httpx.AsyncClient() as client:
+            with open(filepath, "rb") as f:
+                files = {'files': (str(filepath), f, 'image/jpeg')}
+                response = await client.post(
+                    f"{REPO_BASE_URL}/upload",
+                    files=files,
+                )
+        if response.status_code == 200:
+            await collect_matcher.finish("已收收录进明乃的涩图站~")
+        else:
+            await collect_matcher.finish("收录失败，请稍后再试")
+    else:
+        await collect_matcher.finish("该插画相关信息已被移除")

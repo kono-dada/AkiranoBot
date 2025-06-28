@@ -7,6 +7,7 @@ from nonebot.adapters.onebot.v11 import (
     MessageEvent,
 )
 import httpx
+
 def get_public_ip() -> str:
     try:
         response = httpx.get("https://ipinfo.io/json")
@@ -40,8 +41,9 @@ async def handle_ip_query(
     """处理IP查询命令"""
     user_id = str(event.get_user_id())
     if user_id in plugin_config.ip_superusers or "*" in plugin_config.ip_superusers:
-        ip_address = get_public_ip()
         try:
-            await ip_query_matcher.finish(f"明乃的涩图小站是: http://{ip_address}:3000，可以前往上传图片")
+            ip_address = get_public_ip()
         except Exception as e:
             await ip_query_matcher.finish("明乃丢失了色图小站。")
+
+        await ip_query_matcher.finish(f"明乃的涩图小站是: http://{ip_address}:3000，可以前往上传图片")

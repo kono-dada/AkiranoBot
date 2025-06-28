@@ -101,9 +101,6 @@ async def fetch_local_pic():
     try:
         response = await client.get(image_list_url)
         if response.status_code != 200:
-            logger.warning(
-                f"Image list respond status code error: {response.status_code}"
-            )
             raise ValueError(
                 f"Image list respond status code error: {response.status_code}"
             )
